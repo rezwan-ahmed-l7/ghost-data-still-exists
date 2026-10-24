@@ -1,0 +1,26 @@
+cat > .gitignore << 'EOF'
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+
+# Large / unnecessary
+dataset/evidence/
+*.zip
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.sqlite
+*.db
+
+# Output & temp
+output.csv
+*.tmp
+__pycache__/
+.pytest_cache/
+EOF
