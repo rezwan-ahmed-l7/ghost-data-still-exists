@@ -1,0 +1,8 @@
+[project]
+name = "ghost-data-audit-foundation"
+version = "0.1.0"
+description = "Phase 1 CSV loader and audit-time identity resolver"
+requires-python = ">=3.10"
+
+[tool.unittest]
+start-directory = "tests"
