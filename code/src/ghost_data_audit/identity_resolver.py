@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
@@ -44,12 +43,6 @@ def _normalize_field(field_name: str, value: str | None) -> str:
         # only for comparisons and removes formatting punctuation, not country digits.
         return "".join(character for character in raw if character.isdigit() or character == "+")
     return raw
-
-
-def _email_hash_candidates(email: str) -> set[str]:
-    normalized = normalize_email(email)
-    variants = {normalized, (email or "").strip()}
-    return {hashlib.sha256(value.encode("utf-8")).hexdigest() for value in variants if value}
 
 
 @dataclass(frozen=True)
@@ -109,7 +102,6 @@ class IdentityResolver:
             raise ValueError(f"Invalid audit_at timestamp: {audit_at!r}")
 
         requested = normalize_email(email)
-        request_hashes = _email_hash_candidates(email)
         aliases: dict[str, dict[str, dict[str, str]]] = {}
         # alias index: user_id -> field -> normalized value -> provenance
         for user_id, identity in self._identity_by_user.items():
@@ -129,7 +121,9 @@ class IdentityResolver:
         for event in self._audit_log:
             user_id = str(event.get("user_id", "")).strip()
             field_name = str(event.get("field_name", "")).strip().casefold()
-            if user_id and field_name in IDENTITY_FIELDS and _parse_time(str(event.get("event_time", ""))):
+            event_time = _parse_time(str(event.get("event_time", "")))
+            # A future audit event is not available at this case's audit cutoff.
+            if user_id and field_name in IDENTITY_FIELDS and event_time is not None and event_time <= cutoff:
                 events_by_user_field.setdefault((user_id, field_name), []).append(event)
 
         for (user_id, field_name), events in events_by_user_field.items():
@@ -170,11 +164,9 @@ class IdentityResolver:
             }
             for field_name, values in field_aliases.items():
                 for normalized_value, metadata in values.items():
-                    is_match = (
-                        field_name == "email" and normalized_value == requested
-                    ) or (
-                        field_name == "email_hash" and normalized_value.casefold() in request_hashes
-                    )
+                    # The request supplies an email, not an email hash. Stored hashes
+                    # remain opaque unless the official data documents their algorithm.
+                    is_match = field_name == "email" and normalized_value == requested
                     if is_match:
                         match = IdentityMatch(
                             user_id=user_id,
@@ -182,14 +174,6 @@ class IdentityResolver:
                             matched_identifier=metadata["raw_value"],
                             source_id=metadata["source_id"],
                         )
-                        matches[(user_id, match.match_type, match.source_id)] = match
-
-        # A request-side hash can be matched directly when a source supplies one.
-        if requested and all(character in "0123456789abcdef" for character in requested) and len(requested) == 64:
-            for user_id, field_aliases in aliases.items():
-                for normalized_value, metadata in field_aliases.get("email_hash", {}).items():
-                    if normalized_value == requested:
-                        match = IdentityMatch(user_id, metadata["match_type"], metadata["raw_value"], metadata["source_id"])
                         matches[(user_id, match.match_type, match.source_id)] = match
 
         matched_ids = tuple(sorted({match.user_id for match in matches.values()}))
